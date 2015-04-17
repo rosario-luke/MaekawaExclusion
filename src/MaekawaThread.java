@@ -124,10 +124,11 @@ public class MaekawaThread implements Runnable {
 
     public void criticalSection(){
 
-        System.out.print(System.currentTimeMillis() + " " + _identifier + " ");
+        System.out.print("time(" + System.currentTimeMillis() + ") id(" + _identifier + ") node-list(");
         for(Integer i : _votingSetIds){
             System.out.print(i + " ");
         }
+        System.out.print(")");
         System.out.println("");
         sleep(config.getCsInt());
     }
