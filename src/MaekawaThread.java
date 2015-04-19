@@ -23,10 +23,16 @@ public class MaekawaThread implements Runnable {
     private Thread _t;
     private MaekawaOptions config;
     private Object _init_cv;
-
+    private MaekawaMessage _lastRepliedMessage;
     private Queue<MaekawaMessage> _requestQueue;
+    private Queue<MaekawaMessage> _failQueue;
+    private Integer CSSTAT;
+    private int num_replies;
+    private boolean have_inquired;
+    private Random rand;
+    private int num_success;
 
-    public MaekawaThread(int id, LinkedBlockingQueue<MaekawaMessage> q, ArrayList<LinkedBlockingQueue<MaekawaMessage>> vSet, ArrayList<Integer> vSetId, MaekawaOptions c, Object cv){
+    public MaekawaThread(int id, LinkedBlockingQueue<MaekawaMessage> q, ArrayList<LinkedBlockingQueue<MaekawaMessage>> vSet, ArrayList<Integer> vSetId, MaekawaOptions c, Object cv, Integer cs){
 
         _votingSet = vSet;
         _identifier = id;
@@ -34,12 +40,43 @@ public class MaekawaThread implements Runnable {
         _voted = false;
         _myQueue = q;
         _votingSetIds = vSetId;
-        _requestQueue = new LinkedList<MaekawaMessage>();
+        //_requestQueue = new LinkedList<MaekawaMessage>();
+        //_failQueue = new LinkedList<MaekawaMessage>();
         config = c;
         _init_cv = cv;
+        _lastRepliedMessage = null;
+        num_replies = 0;
+        CSSTAT = cs;
+        _requestQueue = new PriorityQueue<MaekawaMessage>(new MessageComparator());
+        have_inquired = false;
+        rand = new Random(System.currentTimeMillis());
+        num_success = 0;
+       /* for(int i = 0;i < 10; i++){
+            MaekawaMessage m = new MaekawaMessage(i, null, 1);
+            try{
+                Thread.sleep(100);
+            } catch(Exception e){
 
+            }
+            _requestQueue.add(m);
+        }
+        for(int i =0; i<10; i++){
+            MaekawaMessage m = _requestQueue.poll();
+            System.out.println(m.getTimestamp());
+        }*/
 
+    }
 
+    public static class MessageComparator implements Comparator<MaekawaMessage>{
+        public int compare(MaekawaMessage a, MaekawaMessage b){
+            if(a.getTimestamp() < b.getTimestamp()){
+                return -1;
+            } else if(a.getTimestamp() == b.getTimestamp()){
+                return 0;
+            } else {
+                return 1;
+            }
+        }
     }
 
     public void stop(){
@@ -63,41 +100,71 @@ public class MaekawaThread implements Runnable {
         while(true){
 
             // REQUEST STAGE
-            MaekawaMessage request = new MaekawaMessage(_identifier, _myQueue, MaekawaMessage.REQUEST);
+            MaekawaMessage request = new MaekawaMessage(_identifier, _myQueue, MaekawaMessage.REQUEST, num_success);
             multicast(request);
 
-            int num_replies = 0;
+            num_replies = 0;
+            //_voted = false;
 
             // Wait until number of replies is met
             while (num_replies < _votingSet.size()) {
 
                 MaekawaMessage received = receiveMessage();
                 if(received.isRequest()){
-                    if(_voted){
+                    /*if(_voted){
                         _requestQueue.add(received);
                         continue;
                     } else {
                         MaekawaMessage reply = new MaekawaMessage(_identifier, _myQueue, MaekawaMessage.REQUEST_REPLY);
                         reply(reply, received);
+                        _lastRepliedMessage = received;
                         _voted = true;
                         continue;
-                    }
+                    }*/
+                    request(received);
                 } else if(received.isRequestReply()){
                     num_replies++;
                     continue;
                 } else if(received.isRelease()){
+                    //_lastRepliedMessage = null;
+                    have_inquired = false;
                     if(!_requestQueue.isEmpty()) {
-                        MaekawaMessage prev_request = _requestQueue.remove();
-                        MaekawaMessage reply = new MaekawaMessage(_identifier, _myQueue, MaekawaMessage.REQUEST_REPLY);
+                        MaekawaMessage prev_request = _requestQueue.poll();
+                        MaekawaMessage reply = new MaekawaMessage(_identifier, _myQueue, MaekawaMessage.REQUEST_REPLY, num_success);
                         reply(reply, prev_request);
+                        _lastRepliedMessage = prev_request;
                         _voted = true;
                         continue;
                     } else {
                         _voted = false;
                         continue;
                     }
+                } else if(received.isFail()){
+                    _failQueue.add(received);
+
+                } else if(received.isInquire()){
+
+                        num_replies --;
+                        MaekawaMessage yield = new MaekawaMessage(_identifier, _myQueue, MaekawaMessage.YIELD, num_success);
+                        reply(yield, received);
+
+                } else if(received.isYield()){
+                    //_lastRepliedMessage = null;
+                    //_voted = false;
+                    _requestQueue.offer(_lastRepliedMessage);
+                    MaekawaMessage prev_request = _requestQueue.poll();
+                    MaekawaMessage reply = new MaekawaMessage(_identifier, _myQueue, MaekawaMessage.REQUEST_REPLY, num_success);
+                    reply(reply, prev_request);
+                    _lastRepliedMessage = prev_request;
+                    _voted = true;
+                    have_inquired = false;
+                    continue;
+
                 }
             }
+
+            //_lastRepliedMessage = null;
+            //_failQueue.clear();
 
             _status = HELD;
 
@@ -105,7 +172,7 @@ public class MaekawaThread implements Runnable {
 
             _status = RELEASE;
 
-            MaekawaMessage release = new MaekawaMessage(_identifier, _myQueue, MaekawaMessage.RELEASE);
+            MaekawaMessage release = new MaekawaMessage(_identifier, _myQueue, MaekawaMessage.RELEASE, num_success);
             multicast(release);
 
             sleep(config.getNextReq());
@@ -113,17 +180,39 @@ public class MaekawaThread implements Runnable {
             _status = REQUEST;
 
 
+
+
         }
 
 
+    }
+
+    public void request(MaekawaMessage r){
+        if(_voted){
+            _requestQueue.offer(r);
+            if(_lastRepliedMessage.getTimestamp() == r.getTimestamp()){System.out.println("SAME TIMESTAMP");}
+            if(_lastRepliedMessage.getTimestamp() > r.getTimestamp() && !have_inquired ){
+                MaekawaMessage inquire = new MaekawaMessage(_identifier, _myQueue, MaekawaMessage.INQUIRE, num_success);
+                reply(inquire, _lastRepliedMessage);
+
+                have_inquired = true;
+            }
+        } else {
+            MaekawaMessage reply = new MaekawaMessage(_identifier, _myQueue, MaekawaMessage.REQUEST_REPLY, num_success);
+            reply(reply, r);
+            _voted = true;
+            _lastRepliedMessage = r;
+        }
     }
 
     public Thread getThread(){
         return _t;
     }
 
-    public void criticalSection(){
 
+
+    public void criticalSection(){
+        num_success+=10;
         System.out.print("time(" + System.currentTimeMillis() + ") id(" + _identifier + ") node-list(");
         for(Integer i : _votingSetIds){
             System.out.print(i + " ");
@@ -156,7 +245,7 @@ public class MaekawaThread implements Runnable {
                         _myQueue.remove(received);
                     }
                     if (config.isPrintOption()) {
-                        System.out.println(System.currentTimeMillis() + " " + _identifier + " " + received.getOrigin() + " " + received.getTypeString());
+                        System.out.println(System.currentTimeMillis() + " " + _identifier + " " + received.getOrigin() + " " + received.getTypeString() + " timestamp(" + received.getTimestamp() + ")");
                     }
                     return received;
                 } catch (Exception e) {
@@ -209,7 +298,7 @@ public class MaekawaThread implements Runnable {
         while(true) {
             synchronized (received.getReturnQueue()) {
                 try {
-                    received.getReturnQueue().put(toSend);
+                    received.getReturnQueue().offer(toSend);
                     return;
                 } catch (Exception e) {
                 }

@@ -34,8 +34,8 @@ public class CoordinatorThread {
         for(int i = 0; i < 9; i++){
             queues[i] = new LinkedBlockingQueue<MaekawaMessage>(200);
         }
-
-        ArrayList<MaekawaThread> myThreads = createThreads(queues, config, init_condition);
+        Integer CSSTAT = 0;
+        ArrayList<MaekawaThread> myThreads = createThreads(queues, config, init_condition, CSSTAT);
 
         System.out.println("Created Threads -- Going to start");
 
@@ -94,7 +94,7 @@ public class CoordinatorThread {
         }
     }
 
-    public static ArrayList<MaekawaThread> createThreads(LinkedBlockingQueue<MaekawaMessage>[] queues, MaekawaOptions config, Object init_condition){
+    public static ArrayList<MaekawaThread> createThreads(LinkedBlockingQueue<MaekawaMessage>[] queues, MaekawaOptions config, Object init_condition, Integer CSSTAT){
         ArrayList<MaekawaThread> threads = new ArrayList<MaekawaThread>();
 
         for(int i = 1; i < 10; i++){
@@ -107,7 +107,7 @@ public class CoordinatorThread {
                 System.out.print(" " + pos + " ");
             }
 
-            threads.add(new MaekawaThread(i, queues[i-1], vSet, vInts, config, init_condition));
+            threads.add(new MaekawaThread(i, queues[i-1], vSet, vInts, config, init_condition, CSSTAT));
             System.out.println("");
         }
 
