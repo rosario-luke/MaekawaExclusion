@@ -223,7 +223,7 @@ public class MaekawaThread implements Runnable {
     }
 
     public void sleep(int secs){
-        long mil = secs*1000;
+        long mil = secs;
         try{
             Thread.sleep(mil);
         } catch(Exception e){
